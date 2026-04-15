@@ -379,7 +379,8 @@ def responder(tel, mensaje_orig):
 
     # ── DATOS BANCARIOS ────────────────────────────────────────
     if tiene(msg,["cuenta","iban","numero de cuenta","como pago","donde pago",
-                  "datos para pagar","banco","transferencia","depositar","deposito",
+                  "datos para pagar","transferencia","depositar","deposito",
+                  "datos bancarios","banreservas","caixabank","datos del banco",
                   "cuanto tengo que pagar","cuanto debo","que debo","lo que debo"]):
         return DATOS_BANCARIOS, False
 
