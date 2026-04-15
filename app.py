@@ -482,9 +482,12 @@ def responder(tel, mensaje_orig):
 
     # ── CUÁNDO RECOGEN ─────────────────────────────────────────
     if tiene(msg,["cuando recogen","cuando pasan","cuando van","cuando vienen",
+                  "cuando tienes","cuando tiene","cuando teneis","que dia recogen",
+                  "que dia tienes","que dia viene","qué día","que dia recoges","recoges",
                   "a que hora","que hora pasan","recogida","recojer","recoger",
                   "van a pasar","me recogen","cuanto tiempo","la recojida","recojida",
-                  "dia de recogida","día de recogida"]):
+                  "dia de recogida","día de recogida","teneis recogida","tienes recogida",
+                  "hay recogida","hay recojida"]):
         # Prioridad: si menciona zona Y fuera, zona gana
         zona  = en_zona(msg)
         fuera = fuera_zona(msg) if not zona else None
@@ -707,23 +710,29 @@ def responder(tel, mensaje_orig):
             "y te responde en breve."
         ), True
 
-    # ── CIUDAD SOLA — "estoy en X" o solo el nombre de ciudad ──
+    # ── CIUDAD EN ZONA — detecta ciudad en CUALQUIER mensaje ──────
     zona = en_zona(msg)
     if zona:
         agenda = zonas_recogida()
-        if agenda:
-            dia, nombre_zona, hora = dia_para_ciudad(msg, agenda)
-            if dia:
-                horario_txt = f"\n🕐 Horario: {hora}" if hora else ""
-                return (
-                    f"📍 *{zona.title()}* — tenemos recogida:\n\n"
-                    f"📅 *{dia}*{horario_txt}\n\n"
-                    "Dinos tu dirección completa\n"
-                    "y coordinamos la recogida 😊"
-                ), False
-        avisar(f"Menciona ciudad en zona: {zona}", tel, mensaje_orig)
+        dia, nombre_zona, hora = dia_para_ciudad(msg, agenda)
+        if dia and dia != "__sin_fecha__":
+            horario_txt = f"\n🕐 Horario: {hora}" if hora else ""
+            return (
+                f"🚚 *Recogemos en {zona.title()}:*\n\n"
+                f"📅 Próxima recogida: *{dia}*{horario_txt}\n\n"
+                "Dinos tu dirección completa\n"
+                "y coordinamos 😊"
+            ), False
+        if dia == "__sin_fecha__":
+            avisar(f"Recogida en {nombre_zona} — sin fecha configurada", tel, mensaje_orig)
+            return (
+                f"🚚 Recogemos en *{zona.title()}* 😊\n\n"
+                "Estamos coordinando la próxima fecha.\n"
+                "Un agente te confirma en breve 📅"
+            ), True
+        avisar(f"Ciudad en zona sin agenda: {zona}", tel, mensaje_orig)
         return (
-            f"📍 Recogemos en *{zona.title()}* 😊\n\n"
+            f"🚚 Recogemos en *{zona.title()}* 😊\n\n"
             "Un agente te confirma el día.\n"
             "Dinos tu dirección completa."
         ), True
