@@ -115,25 +115,44 @@ def activar_modo_humano(tel, horas=2):
         })
     except: pass
 
+# Agenda por defecto — se sobreescribe con lo que guardes en el CRM
+AGENDA_DEFAULT = {
+    "zona_asturias":   { "nombre":"Asturias",           "ciudades":["gijon","oviedo","aviles","mieres","langreo","navia","cangas","llanes","siero","pola","lugones"], "proximo_dia":"el viernes", "horario":"10:00-14:00" },
+    "zona_cantabria":  { "nombre":"Cantabria",           "ciudades":["santander","torrelavega","castro","laredo","reinosa","noja","solares","camargo","astillero","colindres","santoña"], "proximo_dia":"el miércoles", "horario":"10:00-14:00" },
+    "zona_pais_vasco": { "nombre":"País Vasco",          "ciudades":["bilbao","san sebastian","vitoria","donostia","barakaldo","getxo","irun","eibar","santurtzi","basauri","durango"], "proximo_dia":"el jueves", "horario":"10:00-14:00" },
+    "zona_valladolid": { "nombre":"Valladolid y Zamora", "ciudades":["valladolid","zamora","salamanca","medina","benavente","ciudad rodrigo"], "proximo_dia":"el martes", "horario":"10:00-14:00" },
+}
+
 def zonas_recogida():
-    """Lee el calendario de recogidas desde Firestore"""
+    """Lee el calendario de recogidas desde Firestore — usa agenda por defecto si está vacío"""
     try:
         doc = db.collection("config").document("agenda_recogidas").get()
-        if doc.exists: return doc.to_dict()
+        if doc.exists:
+            data = doc.to_dict()
+            if data: return data
     except: pass
-    return {}
+    return AGENDA_DEFAULT  # Fallback hardcodeado
+
+def ciudad_en_agenda(ciudad_msg, agenda):
+    """Busca una ciudad en la agenda — más flexible"""
+    ciudad_msg = ciudad_msg.lower().strip()
+    for key, zona in agenda.items():
+        ciudades = [c.lower().strip() for c in zona.get("ciudades", [])]
+        for c in ciudades:
+            if c in ciudad_msg or ciudad_msg in c:
+                return zona
+    return None
 
 def dia_recogida_zona(ciudad, agenda):
     """Devuelve el próximo día de recogida para una ciudad"""
-    ciudad = ciudad.lower().strip()
-    for zona, datos in agenda.items():
-        ciudades = [c.lower().strip() for c in datos.get("ciudades", [])]
-        if any(ciudad in c or c in ciudad for c in ciudades):
-            # Preferir fecha exacta si existe
+    ciudad_clean = limpiar(ciudad)
+    for key, datos in agenda.items():
+        ciudades = [limpiar(c) for c in datos.get("ciudades", [])]
+        if any(ciudad_clean in c or c in ciudad_clean for c in ciudades):
             fecha = datos.get("proximo_fecha","")
             dia   = datos.get("proximo_dia","")
             hora  = datos.get("horario","")
-            nombre_zona = datos.get("nombre", zona)
+            nombre_zona = datos.get("nombre", key)
             if fecha:
                 try:
                     from datetime import date
@@ -145,6 +164,29 @@ def dia_recogida_zona(ciudad, agenda):
                     return dia_texto, nombre_zona, hora
                 except: pass
             return dia, nombre_zona, hora
+    return None, None, None
+
+def dia_para_ciudad(msg, agenda):
+    """Busca directamente en el mensaje qué zona le corresponde"""
+    msg_clean = limpiar(msg)
+    for key, datos in agenda.items():
+        ciudades = [limpiar(c) for c in datos.get("ciudades", [])]
+        for c in ciudades:
+            if c in msg_clean:
+                fecha = datos.get("proximo_fecha","")
+                dia   = datos.get("proximo_dia","")
+                hora  = datos.get("horario","")
+                nombre_zona = datos.get("nombre", key)
+                if fecha:
+                    try:
+                        from datetime import date
+                        d = date.fromisoformat(fecha)
+                        dias_es = ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"]
+                        meses_es = ["enero","febrero","marzo","abril","mayo","junio",
+                                    "julio","agosto","septiembre","octubre","noviembre","diciembre"]
+                        return f"{dias_es[d.weekday()]} {d.day} de {meses_es[d.month-1]}", nombre_zona, hora
+                    except: pass
+                return dia, nombre_zona, hora
     return None, None, None
 
 def buscar_exp(tel):
@@ -393,7 +435,7 @@ def responder(tel, mensaje_orig):
         zona = en_zona(msg)
         agenda = zonas_recogida()
         if zona and agenda:
-            dia, nombre_zona, hora = dia_recogida_zona(zona, agenda)
+            dia, nombre_zona, hora = dia_para_ciudad(msg, agenda)
             if dia:
                 horario_txt = f"\n🕐 Horario: {hora}" if hora else ""
                 return (
@@ -458,7 +500,7 @@ def responder(tel, mensaje_orig):
             ), True
         agenda = zonas_recogida()
         if zona and agenda:
-            dia, nombre_zona, hora = dia_recogida_zona(zona, agenda)
+            dia, nombre_zona, hora = dia_para_ciudad(msg, agenda)
             if dia:
                 avisar("Pregunta recogida — zona en agenda", tel, mensaje_orig)
                 horario_txt = f"\n🕐 Horario: {hora}" if hora else ""
@@ -661,7 +703,7 @@ def responder(tel, mensaje_orig):
     if zona:
         agenda = zonas_recogida()
         if agenda:
-            dia, nombre_zona, hora = dia_recogida_zona(zona, agenda)
+            dia, nombre_zona, hora = dia_para_ciudad(msg, agenda)
             if dia:
                 horario_txt = f"\n🕐 Horario: {hora}" if hora else ""
                 return (
@@ -774,6 +816,43 @@ def webhook():
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({"status":"Crisbell Bot v9 — Optimizado"}), 200
+
+@app.route("/test-agenda", methods=["GET"])
+def test_agenda():
+    """Diagnóstico de agenda — ver qué tiene Firestore"""
+    try:
+        doc = db.collection("config").document("agenda_recogidas").get()
+        if doc.exists:
+            data = doc.to_dict()
+            resumen = {}
+            for key, zona in data.items():
+                ciudades = zona.get("ciudades", [])
+                resumen[key] = {
+                    "nombre": zona.get("nombre",""),
+                    "ciudades": ciudades,
+                    "proximo_fecha": zona.get("proximo_fecha",""),
+                    "proximo_dia": zona.get("proximo_dia",""),
+                    "horario": zona.get("horario","")
+                }
+            return jsonify({"fuente":"firestore","zonas":resumen}), 200
+        else:
+            return jsonify({"fuente":"agenda_default_no_firestore","mensaje":"Firestore vacío — usando agenda hardcodeada"}), 200
+    except Exception as e:
+        return jsonify({"error":str(e)}), 500
+
+@app.route("/test-ciudad/<ciudad>", methods=["GET"])
+def test_ciudad(ciudad):
+    """Prueba si el bot detecta una ciudad"""
+    agenda = zonas_recogida()
+    dia, zona, hora = dia_para_ciudad(ciudad, agenda)
+    return jsonify({
+        "ciudad_buscada": ciudad,
+        "ciudad_limpia": limpiar(ciudad),
+        "dia_encontrado": dia,
+        "zona": zona,
+        "horario": hora,
+        "fuente": "firestore" if db.collection("config").document("agenda_recogidas").get().exists else "default"
+    }), 200
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
