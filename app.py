@@ -115,23 +115,16 @@ def activar_modo_humano(tel, horas=2):
         })
     except: pass
 
-# Agenda por defecto — se sobreescribe con lo que guardes en el CRM
-AGENDA_DEFAULT = {
-    "zona_asturias":   { "nombre":"Asturias",           "ciudades":["gijon","oviedo","aviles","mieres","langreo","navia","cangas","llanes","siero","pola","lugones"], "proximo_dia":"el viernes", "horario":"10:00-14:00" },
-    "zona_cantabria":  { "nombre":"Cantabria",           "ciudades":["santander","torrelavega","castro","laredo","reinosa","noja","solares","camargo","astillero","colindres","santoña"], "proximo_dia":"el miércoles", "horario":"10:00-14:00" },
-    "zona_pais_vasco": { "nombre":"País Vasco",          "ciudades":["bilbao","san sebastian","vitoria","donostia","barakaldo","getxo","irun","eibar","santurtzi","basauri","durango"], "proximo_dia":"el jueves", "horario":"10:00-14:00" },
-    "zona_valladolid": { "nombre":"Valladolid y Zamora", "ciudades":["valladolid","zamora","salamanca","medina","benavente","ciudad rodrigo"], "proximo_dia":"el martes", "horario":"10:00-14:00" },
-}
-
 def zonas_recogida():
-    """Lee el calendario de recogidas desde Firestore — usa agenda por defecto si está vacío"""
+    """Lee el calendario de recogidas desde Firestore"""
     try:
         doc = db.collection("config").document("agenda_recogidas").get()
         if doc.exists:
             data = doc.to_dict()
             if data: return data
-    except: pass
-    return AGENDA_DEFAULT  # Fallback hardcodeado
+    except Exception as e:
+        print(f"[Agenda] Error leyendo Firestore: {e}")
+    return {}
 
 def ciudad_en_agenda(ciudad_msg, agenda):
     """Busca una ciudad en la agenda — más flexible"""
@@ -167,26 +160,35 @@ def dia_recogida_zona(ciudad, agenda):
     return None, None, None
 
 def dia_para_ciudad(msg, agenda):
-    """Busca directamente en el mensaje qué zona le corresponde"""
+    """Busca la zona de una ciudad en el mensaje y devuelve info de recogida"""
     msg_clean = limpiar(msg)
     for key, datos in agenda.items():
-        ciudades = [limpiar(c) for c in datos.get("ciudades", [])]
-        for c in ciudades:
-            if c in msg_clean:
+        ciudades = datos.get("ciudades", [])
+        if isinstance(ciudades, str):
+            ciudades = [c.strip() for c in ciudades.split(',')]
+        ciudades_limpias = [limpiar(c) for c in ciudades]
+        for c in ciudades_limpias:
+            if c and c in msg_clean:
                 fecha = datos.get("proximo_fecha","")
                 dia   = datos.get("proximo_dia","")
                 hora  = datos.get("horario","")
                 nombre_zona = datos.get("nombre", key)
+                # Prioridad: fecha exacta
                 if fecha:
                     try:
-                        from datetime import date
-                        d = date.fromisoformat(fecha)
+                        from datetime import date as dt
+                        d = dt.fromisoformat(fecha)
                         dias_es = ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"]
                         meses_es = ["enero","febrero","marzo","abril","mayo","junio",
                                     "julio","agosto","septiembre","octubre","noviembre","diciembre"]
-                        return f"{dias_es[d.weekday()]} {d.day} de {meses_es[d.month-1]}", nombre_zona, hora
+                        dia_fmt = f"{dias_es[d.weekday()]} {d.day} de {meses_es[d.month-1]}"
+                        return dia_fmt, nombre_zona, hora
                     except: pass
-                return dia, nombre_zona, hora
+                # Sin fecha: devolver proximo_dia si existe, o señal de "sin fecha"
+                if dia:
+                    return dia, nombre_zona, hora
+                # Zona encontrada pero sin fecha configurada
+                return "__sin_fecha__", nombre_zona, hora
     return None, None, None
 
 def buscar_exp(tel):
@@ -434,17 +436,15 @@ def responder(tel, mensaje_orig):
         avisar("📦 Caja lista para recoger", tel, mensaje_orig)
         zona = en_zona(msg)
         agenda = zonas_recogida()
-        if zona and agenda:
-            dia, nombre_zona, hora = dia_para_ciudad(msg, agenda)
-            if dia:
-                horario_txt = f"\n🕐 Horario: {hora}" if hora else ""
-                return (
-                    f"📦 *¡Perfecto!*\n\n"
-                    f"📅 Próxima recogida en {zona.title()}:\n"
-                    f"*{dia}*{horario_txt}\n\n"
-                    "Para confirmarlo dinos:\n"
-                    "📍 Tu dirección completa 😊"
-                ), False
+        dia, nombre_zona, hora = dia_para_ciudad(msg, agenda)
+        if dia and dia != "__sin_fecha__":
+            horario_txt = f"\n🕐 Horario: {hora}" if hora else ""
+            return (
+                f"📦 *¡Perfecto!*\n\n"
+                f"📅 Próxima recogida en {zona.title() if zona else nombre_zona}:\n"
+                f"*{dia}*{horario_txt}\n\n"
+                "Dinos tu dirección completa 😊"
+            ), False
         return (
             "📦 *¡Perfecto, tenla lista!*\n\n"
             "Un agente te confirma el día\n"
@@ -499,18 +499,26 @@ def responder(tel, mensaje_orig):
                 "para buscar solución 😊"
             ), True
         agenda = zonas_recogida()
-        if zona and agenda:
-            dia, nombre_zona, hora = dia_para_ciudad(msg, agenda)
-            if dia:
-                avisar("Pregunta recogida — zona en agenda", tel, mensaje_orig)
-                horario_txt = f"\n🕐 Horario: {hora}" if hora else ""
-                return (
-                    f"🚚 *Próxima recogida en {zona.title()}:*\n\n"
-                    f"📅 *{dia}*{horario_txt}\n\n"
-                    "Para confirmarlo dinos:\n"
-                    "📍 Tu dirección completa\n"
-                    "📦 Cuántas cajas tienes 😊"
-                ), False
+        dia, nombre_zona, hora = dia_para_ciudad(msg, agenda)
+        if dia and dia != "__sin_fecha__":
+            horario_txt = f"\n🕐 Horario: {hora}" if hora else ""
+            return (
+                f"🚚 *Próxima recogida en {zona.title() if zona else nombre_zona}:*\n\n"
+                f"📅 *{dia}*{horario_txt}\n\n"
+                "Para confirmarlo dinos:\n"
+                "📍 Tu dirección completa\n"
+                "📦 Cuántas cajas tienes 😊"
+            ), False
+        if dia == "__sin_fecha__":
+            # Zona encontrada pero sin fecha — avisar a Cristhian
+            avisar(f"Recogida en {nombre_zona} — sin fecha configurada", tel, mensaje_orig)
+            return (
+                f"🚚 Recogemos en *{nombre_zona}* 😊\n\n"
+                "Estamos coordinando las fechas\n"
+                "de la próxima semana.\n\n"
+                "Un agente te confirma el día\n"
+                "exacto en breve 📅"
+            ), True
         avisar("Pregunta cuándo recogen", tel, mensaje_orig)
         return (
             "🚚 *Recogemos a domicilio.*\n\n"
