@@ -126,14 +126,26 @@ def zonas_recogida():
 def dia_recogida_zona(ciudad, agenda):
     """Devuelve el próximo día de recogida para una ciudad"""
     ciudad = ciudad.lower().strip()
-    # Buscar en zonas
     for zona, datos in agenda.items():
         ciudades = [c.lower().strip() for c in datos.get("ciudades", [])]
         if any(ciudad in c or c in ciudad for c in ciudades):
-            dia = datos.get("proximo_dia", "")
+            # Preferir fecha exacta si existe
+            fecha = datos.get("proximo_fecha","")
+            dia   = datos.get("proximo_dia","")
+            hora  = datos.get("horario","")
             nombre_zona = datos.get("nombre", zona)
-            return dia, nombre_zona
-    return None, None
+            if fecha:
+                try:
+                    from datetime import date
+                    d = date.fromisoformat(fecha)
+                    dias_es = ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"]
+                    meses_es = ["enero","febrero","marzo","abril","mayo","junio",
+                                "julio","agosto","septiembre","octubre","noviembre","diciembre"]
+                    dia_texto = f"{dias_es[d.weekday()]} {d.day} de {meses_es[d.month-1]}"
+                    return dia_texto, nombre_zona, hora
+                except: pass
+            return dia, nombre_zona, hora
+    return None, None, None
 
 def buscar_exp(tel):
     t = tel.replace("@c.us","").replace("+","").replace(" ","")
@@ -392,12 +404,14 @@ def responder(tel, mensaje_orig):
         agenda = zonas_recogida()
         zona_encontrada = en_zona(msg)
         if zona_encontrada and agenda:
-            dia, nombre_zona = dia_recogida_zona(zona_encontrada, agenda)
+            dia, nombre_zona, hora = dia_recogida_zona(zona_encontrada, agenda)
             if dia:
                 avisar("Pregunta recogida — zona en agenda", tel, mensaje_orig)
+                horario_txt = f"\n🕐 Horario: {hora}" if hora else ""
                 return (
                     f"🚚 *Recogemos en {zona_encontrada.title()}*\n\n"
-                    f"📅 Próxima recogida: *{dia}*\n\n"
+                    f"📅 Próxima recogida:\n"
+                    f"*{dia}*{horario_txt}\n\n"
                     "Para confirmarlo dinos:\n"
                     "📍 Tu dirección completa\n"
                     "📦 Qué vas a enviar 😊"
