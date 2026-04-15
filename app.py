@@ -383,12 +383,68 @@ def responder(tel, mensaje_orig):
             "📞 +34 942 32 30 50"
         ), False
 
+    # ── CAJA LISTA / CONFIRMAR RECOGIDA ──────────────────────
+    if tiene(msg,["ya tengo","ya esta lista","ya está lista","tengo la caja lista",
+                  "ya la tengo","caja lista","cajas listas","ya están","ya estan",
+                  "listas para","lista para recoger","vienen a por","venís a por",
+                  "cuando vienen a por","que dia vienen","qué día vienen",
+                  "que dia especifico","qué día específico"]):
+        avisar("📦 Caja lista para recoger", tel, mensaje_orig)
+        zona = en_zona(msg)
+        agenda = zonas_recogida()
+        if zona and agenda:
+            dia, nombre_zona, hora = dia_recogida_zona(zona, agenda)
+            if dia:
+                horario_txt = f"\n🕐 Horario: {hora}" if hora else ""
+                return (
+                    f"📦 *¡Perfecto!*\n\n"
+                    f"📅 Próxima recogida en {zona.title()}:\n"
+                    f"*{dia}*{horario_txt}\n\n"
+                    "Para confirmarlo dinos:\n"
+                    "📍 Tu dirección completa 😊"
+                ), False
+        return (
+            "📦 *¡Perfecto, tenla lista!*\n\n"
+            "Un agente te confirma el día\n"
+            "de recogida en breve 😊\n\n"
+            "Dinos tu dirección completa\n"
+            "y cuántas cajas tienes."
+        ), True
+
+    # ── CUÁNTAS CAJAS / CALCULAR PRECIO ───────────────────────
+    if re.search(r'\d+\s*caja', msg) or tiene(msg,["tengo 4","tengo 3","tengo 2","tengo una","tengo 1",
+                  "son 4","son 3","son 2","4 cajas","3 cajas","2 cajas","una caja grande",
+                  "cajas grandes","cajas medianas","cajas pequeñas","cajas mini"]):
+        # Detectar cantidad y tipo
+        cant = re.search(r'(\d+)\s*caja', msg)
+        num = int(cant.group(1)) if cant else 1
+        if tiene(msg,["grande"]) and (p == "rd" or tiene(msg,["dominicana","rd"])):
+            total = num * 150
+            avisar(f"Cliente tiene {num} cajas grandes para RD", tel, mensaje_orig)
+            return (
+                f"🇩🇴 *{num} cajas grandes a RD:*\n\n"
+                f"💰 {num} × 150€ = *{total}€*\n\n"
+                "⏱️ Llegan en ~30 días\n\n"
+                "¿Cuándo tienes las cajas listas?\n"
+                "Dinos tu dirección y coordinamos 😊"
+            ), False
+        if tiene(msg,["mediana"]) and (p == "rd" or tiene(msg,["dominicana","rd"])):
+            total = num * 120
+            return (
+                f"🇩🇴 *{num} cajas medianas a RD:*\n\n"
+                f"💰 {num} × 120€ = *{total}€*\n\n"
+                "⏱️ Llegan en ~30 días\n\n"
+                "¿Cuándo las tienes listas? 😊"
+            ), False
+
     # ── CUÁNDO RECOGEN ─────────────────────────────────────────
     if tiene(msg,["cuando recogen","cuando pasan","cuando van","cuando vienen",
                   "a que hora","que hora pasan","recogida","recojer","recoger",
-                  "van a pasar","me recogen","cuanto tiempo","la recojida","recojida"]):
+                  "van a pasar","me recogen","cuanto tiempo","la recojida","recojida",
+                  "dia de recogida","día de recogida"]):
+        # Prioridad: si menciona zona Y fuera, zona gana
         zona  = en_zona(msg)
-        fuera = fuera_zona(msg)
+        fuera = fuera_zona(msg) if not zona else None
         if fuera and not zona:
             avisar(f"Recogida fuera de zona: {fuera}", tel, mensaje_orig)
             return (
@@ -400,21 +456,18 @@ def responder(tel, mensaje_orig):
                 "Ya avisamos a un agente\n"
                 "para buscar solución 😊"
             ), True
-        # Buscar en agenda de recogidas
         agenda = zonas_recogida()
-        zona_encontrada = en_zona(msg)
-        if zona_encontrada and agenda:
-            dia, nombre_zona, hora = dia_recogida_zona(zona_encontrada, agenda)
+        if zona and agenda:
+            dia, nombre_zona, hora = dia_recogida_zona(zona, agenda)
             if dia:
                 avisar("Pregunta recogida — zona en agenda", tel, mensaje_orig)
                 horario_txt = f"\n🕐 Horario: {hora}" if hora else ""
                 return (
-                    f"🚚 *Recogemos en {zona_encontrada.title()}*\n\n"
-                    f"📅 Próxima recogida:\n"
-                    f"*{dia}*{horario_txt}\n\n"
+                    f"🚚 *Próxima recogida en {zona.title()}:*\n\n"
+                    f"📅 *{dia}*{horario_txt}\n\n"
                     "Para confirmarlo dinos:\n"
                     "📍 Tu dirección completa\n"
-                    "📦 Qué vas a enviar 😊"
+                    "📦 Cuántas cajas tienes 😊"
                 ), False
         avisar("Pregunta cuándo recogen", tel, mensaje_orig)
         return (
@@ -560,11 +613,11 @@ def responder(tel, mensaje_orig):
         ), True
 
     # ── DIRECCIÓN DEL CLIENTE ─────────────────────────────────
-    if (tiene(msg,["calle","avenida","carrera","paseo","avda"]) and
-        tiene(msg,["piso","portal","puerta","bajo","numero","bloque","apto","letra"])):
-        avisar("Cliente envió su dirección", tel, mensaje_orig)
+    if (tiene(msg,["calle","avenida","carrera","paseo","avda","calle ","numero ","ctra ","c/","plaza "]) or
+        re.search(r'\b(juan|san|santa|virgen|garcia|lopez|martinez|hernandez|gonzalez)\b.*\b(\d+|numero|primero|segundo)\b', msg)):
+        avisar("📍 Cliente envió su dirección", tel, mensaje_orig)
         return (
-            "📍 *¡Apuntado!*\n\n"
+            "📍 *¡Apuntado, gracias!*\n\n"
             "Ya avisamos al equipo.\n"
             "Te decimos el día de recogida\n"
             "muy pronto 😊"
@@ -601,6 +654,27 @@ def responder(tel, mensaje_orig):
             "Recibido 😊\n\n"
             "Un agente lo revisará\n"
             "y te responde en breve."
+        ), True
+
+    # ── CIUDAD SOLA — "estoy en X" o solo el nombre de ciudad ──
+    zona = en_zona(msg)
+    if zona:
+        agenda = zonas_recogida()
+        if agenda:
+            dia, nombre_zona, hora = dia_recogida_zona(zona, agenda)
+            if dia:
+                horario_txt = f"\n🕐 Horario: {hora}" if hora else ""
+                return (
+                    f"📍 *{zona.title()}* — tenemos recogida:\n\n"
+                    f"📅 *{dia}*{horario_txt}\n\n"
+                    "Dinos tu dirección completa\n"
+                    "y coordinamos la recogida 😊"
+                ), False
+        avisar(f"Menciona ciudad en zona: {zona}", tel, mensaje_orig)
+        return (
+            f"📍 Recogemos en *{zona.title()}* 😊\n\n"
+            "Un agente te confirma el día.\n"
+            "Dinos tu dirección completa."
         ), True
 
     # ── GENÉRICA — avisar siempre ─────────────────────────────
